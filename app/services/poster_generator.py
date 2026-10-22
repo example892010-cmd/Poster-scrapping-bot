@@ -12,8 +12,17 @@ TEMPLATES_DIR = ROOT / "templates"
 FONTS_DIR = ROOT / "assets" / "fonts"
 
 
+def _template_directory(template_id: str) -> Path:
+    """Resolve both the original and currently tracked template layouts."""
+    candidates = (TEMPLATES_DIR / template_id, TEMPLATES_DIR / template_id / template_id)
+    for directory in candidates:
+        if (directory / "config.json").is_file() and (directory / "template.png").is_file():
+            return directory
+    raise FileNotFoundError(f"Template assets not found for {template_id}")
+
+
 def load_template(template_id: str = "template_01") -> tuple[Image.Image, dict]:
-    directory = TEMPLATES_DIR / template_id
+    directory = _template_directory(template_id)
     with (directory / "config.json").open(encoding="utf-8") as handle:
         config = json.load(handle)
     image = Image.open(directory / "template.png").convert("RGBA")
@@ -26,14 +35,22 @@ def load_template(template_id: str = "template_01") -> tuple[Image.Image, dict]:
 def available_templates() -> list[dict]:
     result = []
     for directory in sorted(TEMPLATES_DIR.glob("template_*")):
-        if (directory / "template.png").exists() and (directory / "config.json").exists():
-            with (directory / "config.json").open(encoding="utf-8") as handle:
+        try:
+            resolved = _template_directory(directory.name)
+        except FileNotFoundError:
+            continue
+        if resolved:
+            with (resolved / "config.json").open(encoding="utf-8") as handle:
                 result.append(json.load(handle))
     return result
 
 
 def _font(name: str, size: int) -> ImageFont.FreeTypeFont:
-    return ImageFont.truetype(str(FONTS_DIR / name), size=size)
+    for directory in (FONTS_DIR, FONTS_DIR / "fonts"):
+        path = directory / name
+        if path.is_file():
+            return ImageFont.truetype(str(path), size=size)
+    raise FileNotFoundError(f"Font asset not found: {name}")
 
 
 def _fit_font(draw: ImageDraw.ImageDraw, text: str, family: str, max_size: int, min_size: int, width: int) -> ImageFont.FreeTypeFont:
