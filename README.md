@@ -1,55 +1,109 @@
-# ANIFLIX Poster Maker Bot
+🎬 ANIFLIX POSTER MAKER BOT
 
-A standalone, database-free Telegram bot that creates ANIFLIX anime posters from user-supplied artwork and metadata. It uses the supplied blank design unchanged as `templates/template_01/template.png`, with its editable coordinates described in `config.json`.
+A Telegram bot for creating anime posters using the ANIFLIX template system.
 
-## Features
+✨ Features
 
-- `/start`, `/create`, `/templates`, `/cancel`, and `/help`.
-- Per-user in-memory FSM sessions using aiogram 3.
-- Template selection designed for adding more `templates/template_XX/` folders later.
-- Proportional artwork fitting with rounded masking and preservation of the supplied decorative circle.
-- Wrapped synopsis, fitting title typography, optional IMDb rating and studio fields.
-- Temporary image cleanup after success, cancellation, or failures.
-- High-quality PNG output.
+* Generate anime posters using uploaded artwork.
+* Add anime title, season, synopsis, genres, and optional rating and studio.
+* Preserve the original uploaded character artwork without redrawing it.
+* Use replaceable poster templates stored in the repository.
+* Keep the existing poster design, layout, colors, and ANIFLIX branding.
+* Lightweight HTTP health server for Render Web Service deployment.
+* In-memory session handling — no database required.
 
-## Run locally
+🛠️ Tech Stack
 
-```bash
-python3 -m venv .venv
-. .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-# Put your Telegram token in .env
-python main.py
-```
+* Python 3.12
+* Aiogram 3
+* Pillow
+* Asyncio HTTP server
 
-Only `BOT_TOKEN` is required. No MongoDB, PostgreSQL, Redis, SQLite, or other database is used.
+📁 Project Structure
 
-## Railway deployment
+Poster-scrapping-bot/
+├── app/
+│   ├── handlers/
+│   └── services/
+│       └── poster_generator.py
+├── assets/
+│   └── fonts/
+├── templates/
+│   └── template_01/
+├── tests/
+│   ├── test_main.py
+│   └── test_poster.py
+├── main.py
+├── Dockerfile
+├── requirements.txt
+├── .env.example
+└── README.md
 
-1. Create a new Railway project from this repository.
-2. Railway will use the included `Dockerfile` (or `railway.toml`).
-3. Add the environment variable `BOT_TOKEN` in the Railway service Variables panel.
-4. Deploy. The process starts with `python main.py` and uses Telegram long polling.
+⚙️ Environment Variables
 
-The bot must receive a valid token from BotFather. Do not commit `.env` or the token.
+Required:
 
-## Adding templates
+* BOT_TOKEN — Telegram bot token from BotFather.
 
-Create a new folder such as `templates/template_02/` containing `template.png` and `config.json` with the same coordinate keys used by the compositor. The template list is discovered at runtime; no core code change is required.
+Optional, only if supported by the code:
 
-## Tests
+* OWNER_ID — Telegram owner user ID.
+* ADMIN_ID — Telegram admin user ID.
 
-Run:
+The HTTP server uses Render’s PORT environment variable automatically and falls back to port 10000 for local testing.
 
-```bash
+Never commit your real bot token to GitHub.
+
+🚀 Deploy on Render
+
+1. Push the latest code to your GitHub repository.
+2. Create or open your Render Web Service.
+3. Connect the repository: example892010-cmd/Poster-scrapping-bot.
+4. Select the main branch.
+5. Add BOT_TOKEN under Environment Variables.
+6. Deploy the latest commit.
+7. Check the deployment logs for both the HTTP server and Telegram bot startup messages.
+
+The bot includes a lightweight HTTP health server so Render can detect an open port. A separate Background Worker is not required for this setup.
+
+❤️ Health Check
+
+After deployment, open your Render service URL:
+
+* / — basic health response.
+* /health — health check endpoint.
+
+Expected response:
+
+{"status":"ok"}
+
+Use your actual Render service URL; do not copy an example domain.
+
+🧪 Tests
+
+Run the automated tests with:
+
 pytest -q
-```
 
-The tests cover configuration loading, season parsing, title/synopsis handling, optional metadata, artwork fitting, rounded masking, aspect ratios, long input, invalid input, and PNG output.
+Tests help check poster generation and application startup behavior. Passing tests do not guarantee that live Telegram interactions work, so test the bot after deployment.
 
-## Limitations
+🤖 Telegram Commands
 
-- Session data is intentionally in memory, so active workflows are lost if the process restarts.
-- Telegram long polling is used; run one bot process at a time.
-- The current first-party template is the single supplied design. Additional designs must provide their own coordinates in `config.json`.
+* /start — start the bot.
+* /create — begin poster creation.
+* /templates — view available templates.
+* /cancel — cancel the current task.
+* /help — show help.
+
+Commands depend on the handlers implemented in the repository.
+
+🗄️ Database
+
+No database connection is required. The bot uses repository files for templates and in-memory state for active sessions. Active sessions may reset when the application restarts.
+
+📌 Project
+
+Brand: ANIFLIX NETWORK TAMIL
+Handle: @ANIFLIXANIMETAMIL
+
+Made for the ANIFLIX anime community.
