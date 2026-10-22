@@ -1,1 +1,22 @@
-
+{
+  "id": "template_01",
+  "name": "ANIFLIX Classic",
+  "canvas": [1672, 941],
+  "artwork_box": [1027, 91, 1635, 858],
+  "artwork_radius": 42,
+  "decorative_circle": [1498, 708, 1635, 852],
+  "title_box": [220, 70, 965, 188],
+  "season_box": [350, 190, 780, 315],
+  "synopsis_box": [220, 360, 980, 470],
+  "metadata_box": [220, 510, 980, 665],
+  "rating_box": [230, 525, 430, 650],
+  "studio_box": [440, 525, 660, 650],
+  "genres_box": [680, 525, 965, 650],
+  "colors": {
+    "white": "#f8f9fb",
+    "muted": "#d8e0ea",
+    "title_outline": "#c591ff",
+    "panel_fill": "#07121f",
+    "accent": "#d8b2ff"
+  }
+}
