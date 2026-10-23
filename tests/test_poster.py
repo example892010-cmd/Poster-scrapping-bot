@@ -18,10 +18,10 @@ def test_template_configuration_loading():
     image, config = load_template()
     assert image.size == tuple(config["canvas"]) == (1672, 941)
     assert available_templates()[0]["id"] == "template_01"
-    assert config["artwork_box"] == [1029, 94, 1633, 856]
-    assert config["editable_regions"]["rating"]["box"] == [230, 600, 405, 655]
-    assert config["editable_regions"]["studio"]["box"] == [450, 600, 650, 655]
-    assert config["editable_regions"]["genres"]["box"] == [680, 600, 915, 655]
+    assert config["artwork_box"] == [1027, 91, 1635, 858]
+    assert config["editable_regions"]["rating"]["box"] == [230, 610, 430, 655]
+    assert config["editable_regions"]["studio"]["box"] == [440, 610, 660, 655]
+    assert config["editable_regions"]["genres"]["box"] == [680, 610, 965, 655]
 
 
 def test_season_and_input_validation():
@@ -48,7 +48,7 @@ def test_aspect_ratios_and_rounded_mask(tmp_path):
     image = Image.open(wide)
     assert image.getpixel((1200, 300))[:3] == (10, 200, 100)
     # The rounded artwork corner remains the template corner rather than the uploaded color.
-    assert image.getpixel((1029, 94))[:3] != (10, 200, 100)
+    assert image.getpixel((1027, 91))[:3] != (10, 200, 100)
 
 
 def test_optional_metadata_is_neutral(tmp_path):
