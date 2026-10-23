@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import json
-import textwrap
 from pathlib import Path
 from typing import Iterable
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
+from PIL import Image, ImageColor, ImageDraw, ImageFilter, ImageFont, ImageOps
 
 ROOT = Path(__file__).resolve().parents[2]
 TEMPLATES_DIR = ROOT / "templates"
@@ -39,9 +38,8 @@ def available_templates() -> list[dict]:
             resolved = _template_directory(directory.name)
         except FileNotFoundError:
             continue
-        if resolved:
-            with (resolved / "config.json").open(encoding="utf-8") as handle:
-                result.append(json.load(handle))
+        with (resolved / "config.json").open(encoding="utf-8") as handle:
+            result.append(json.load(handle))
     return result
 
 
@@ -53,6 +51,10 @@ def _font(name: str, size: int) -> ImageFont.FreeTypeFont:
     raise FileNotFoundError(f"Font asset not found: {name}")
 
 
+def _box_size(box: list[int] | tuple[int, int, int, int]) -> tuple[int, int]:
+    return box[2] - box[0], box[3] - box[1]
+
+
 def _fit_font(draw: ImageDraw.ImageDraw, text: str, family: str, max_size: int, min_size: int, width: int) -> ImageFont.FreeTypeFont:
     for size in range(max_size, min_size - 1, -1):
         font = _font(family, size)
@@ -61,40 +63,56 @@ def _fit_font(draw: ImageDraw.ImageDraw, text: str, family: str, max_size: int, 
     return _font(family, min_size)
 
 
-def _wrap(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont, width: int) -> list[str]:
-    words = text.split()
+def _wrap_lines(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont, width: int) -> list[str]:
+    """Wrap without changing words or punctuation supplied by the user."""
     lines: list[str] = []
-    current = ""
-    for word in words:
-        candidate = f"{current} {word}".strip()
-        if draw.textbbox((0, 0), candidate, font=font)[2] <= width:
-            current = candidate
-        else:
-            if current:
+    for paragraph in str(text).splitlines() or [""]:
+        words = paragraph.split(" ")
+        current = ""
+        for word in words:
+            candidate = word if not current else f"{current} {word}"
+            if not current or draw.textbbox((0, 0), candidate, font=font)[2] <= width:
+                current = candidate
+            else:
                 lines.append(current)
-            current = word
-    if current:
-        lines.append(current)
-    return lines
+                current = word
+        if current:
+            lines.append(current)
+    return lines or [""]
 
 
-def _clear_with_soft_patch(base: Image.Image, box: tuple[int, int, int, int]) -> None:
-    """Clear placeholder text using a clean local strip and a soft blend."""
+def _clear_editable_region(base: Image.Image, pristine: Image.Image, region: dict) -> None:
+    """Replace only a placeholder-value region with a clean local template patch."""
+    box = tuple(region.get("clear_box", region["box"]))
+    if region.get("fill"):
+        base.alpha_composite(
+            Image.new("RGBA", _box_size(box), ImageColor.getcolor(region["fill"], "RGBA")),
+            dest=(box[0], box[1]),
+        )
+        return
+    source = tuple(region["source"])
+    patch = pristine.crop(source).resize(_box_size(box), Image.Resampling.BICUBIC)
+    # A small blur removes source-edge seams while retaining the template's local lighting.
+    base.alpha_composite(patch.filter(ImageFilter.GaussianBlur(radius=1.5)), dest=(box[0], box[1]))
+
+
+def _draw_centered(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont, box: tuple[int, int, int, int], fill: str, stroke_width: int = 0, stroke_fill: str | None = None) -> None:
     x1, y1, x2, y2 = box
-    strip = base.crop((170, y1, 205, y2)).resize((x2 - x1, y2 - y1), Image.Resampling.BICUBIC)
-    base.alpha_composite(strip.filter(ImageFilter.GaussianBlur(radius=6)), dest=(x1, y1))
+    bbox = draw.textbbox((0, 0), text, font=font, stroke_width=stroke_width)
+    x = x1 + max(0, (x2 - x1 - (bbox[2] - bbox[0])) // 2) - bbox[0]
+    y = y1 + max(0, (y2 - y1 - (bbox[3] - bbox[1])) // 2) - bbox[1]
+    draw.text((x, y), text, font=font, fill=fill, stroke_width=stroke_width, stroke_fill=stroke_fill)
 
 
-def _panel(base: Image.Image, box: tuple[int, int, int, int], fill=(5, 16, 28, 230), radius=18) -> None:
+def _draw_wrapped_centered(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont, box: tuple[int, int, int, int], fill: str, line_gap: int = 3) -> None:
     x1, y1, x2, y2 = box
-    overlay = Image.new("RGBA", (x2 - x1, y2 - y1), (0, 0, 0, 0))
-    ImageDraw.Draw(overlay).rounded_rectangle((0, 0, x2 - x1 - 1, y2 - y1 - 1), radius=radius, fill=fill)
-    base.alpha_composite(overlay, dest=(x1, y1))
-
-
-def _opaque_rect(base: Image.Image, box: tuple[int, int, int, int], fill=(5, 16, 28, 255)) -> None:
-    x1, y1, x2, y2 = box
-    base.alpha_composite(Image.new("RGBA", (x2 - x1, y2 - y1), fill), dest=(x1, y1))
+    lines = _wrap_lines(draw, text, font, x2 - x1)
+    line_heights = [draw.textbbox((0, 0), line, font=font)[3] - draw.textbbox((0, 0), line, font=font)[1] for line in lines]
+    total_height = sum(line_heights) + line_gap * max(0, len(lines) - 1)
+    y = y1 + max(0, (y2 - y1 - total_height) // 2)
+    for line, height in zip(lines, line_heights):
+        _draw_centered(draw, line, font, (x1, y, x2, y + height), fill)
+        y += height + line_gap
 
 
 def _paste_artwork(base: Image.Image, artwork: Image.Image, config: dict, decorative_circle: Image.Image) -> None:
@@ -104,7 +122,8 @@ def _paste_artwork(base: Image.Image, artwork: Image.Image, config: dict, decora
     mask = Image.new("L", (width, height), 0)
     ImageDraw.Draw(mask).rounded_rectangle((0, 0, width - 1, height - 1), radius=config["artwork_radius"], fill=255)
     base.alpha_composite(Image.composite(fitted, Image.new("RGBA", fitted.size), mask), dest=(x1, y1))
-    # Restore the template's separate circular decorative element exactly as supplied.
+
+    # Restore the original circular decorative element without restoring its rectangular crop.
     cx1, cy1, cx2, cy2 = config["decorative_circle"]
     circle_mask = Image.new("L", decorative_circle.size, 0)
     ImageDraw.Draw(circle_mask).ellipse((0, 0, decorative_circle.width - 1, decorative_circle.height - 1), fill=255)
@@ -123,58 +142,55 @@ def generate_poster(
     output_path: str | Path | None = None,
 ) -> Image.Image:
     template, config = load_template(template_id)
-    # Keep a pristine copy for the decorative circle that sits over the artwork area.
-    circle_box = tuple(config["decorative_circle"])
-    circle = template.crop(circle_box)
+    pristine = template.copy()
     base = template.copy()
-    draw = ImageDraw.Draw(base)
+    regions = config["editable_regions"]
 
-    # Remove only editable placeholder regions; all permanent branding and controls remain intact.
-    _clear_with_soft_patch(base, (180, 54, 1000, 324))
-    draw = ImageDraw.Draw(base)
-    _panel(base, (225, 366, 970, 462), fill=(5, 16, 28, 235))
-    _panel(base, (225, 516, 975, 657), fill=(5, 16, 28, 235))
-    _opaque_rect(base, (225, 348, 970, 375))
-    for region in ((225, 560, 410, 657), (450, 560, 650, 657), (680, 560, 970, 657)):
-        _opaque_rect(base, region)
-    draw = ImageDraw.Draw(base)
+    # Clear each editable value exactly once. Static labels, icons, dividers, borders,
+    # branding, buttons, and effects remain supplied by the original template.
+    for region in regions.values():
+        _clear_editable_region(base, pristine, region)
 
-    title_box = config["title_box"]
-    title_font = _fit_font(draw, title.upper(), "PosterNarrow-Bold.otf", 105, 42, title_box[2] - title_box[0])
-    title_w = draw.textbbox((0, 0), title.upper(), font=title_font, stroke_width=2)[2]
-    title_x = title_box[0] + max(0, (title_box[2] - title_box[0] - title_w) // 2)
-    draw.text((title_x, title_box[1]), title.upper(), font=title_font, fill=config["colors"]["white"], stroke_width=3, stroke_fill=config["colors"]["title_outline"])
+    # The labels, icons, and dividers are permanent template artwork. Restore their
+    # exact original pixels after clearing the lower value zones.
+    for header_box in ((220, 510, 415, 610), (445, 510, 650, 610), (650, 510, 925, 610)):
+        base.alpha_composite(pristine.crop(header_box), dest=(header_box[0], header_box[1]))
 
+    draw = ImageDraw.Draw(base)
+    white = config["colors"]["white"]
+    title_box = tuple(config["title_box"])
+    title_font = _fit_font(draw, title, "PosterNarrow-Bold.otf", 104, 38, title_box[2] - title_box[0] - 20)
+    _draw_centered(draw, title, title_font, title_box, white, stroke_width=3, stroke_fill=config["colors"]["title_outline"])
+
+    season_box = tuple(config["season_box"])
     season_text = f"SEASON {season}"
-    season_font = _fit_font(draw, season_text, "PosterNarrow-Bold.otf", 98, 40, 560)
-    season_w = draw.textbbox((0, 0), season_text, font=season_font)[2]
-    draw.text((430 - season_w // 2, 202), season_text, font=season_font, fill=config["colors"]["white"])
+    season_font = _fit_font(draw, season_text, "PosterNarrow-Bold.otf", 96, 38, season_box[2] - season_box[0] - 20)
+    _draw_centered(draw, season_text, season_font, season_box, white)
 
+    synopsis_box = tuple(regions["synopsis"]["box"])
     synopsis_font = _font("PosterSans-Regular.otf", 26)
-    synopsis_lines = _wrap(draw, synopsis, synopsis_font, 690)
-    for index, line in enumerate(synopsis_lines[:3]):
-        draw.text((245, 380 + index * 28), line, font=synopsis_font, fill=config["colors"]["white"])
+    _draw_wrapped_centered(draw, synopsis, synopsis_font, (synopsis_box[0] + 15, synopsis_box[1] + 6, synopsis_box[2] - 15, synopsis_box[3] - 6), white, line_gap=4)
 
-    rating_value = rating.strip() if rating and rating.strip() else "—"
-    studio_value = studio.strip() if studio and studio.strip() else "—"
-    genre_text = ", ".join(g.strip() for g in genres if g.strip()) if not isinstance(genres, str) else genres.strip()
-    genre_value = genre_text or "—"
-    label_font = _font("PosterSans-Bold.otf", 18)
-    value_font = _font("PosterSans-Bold.otf", 27)
-    small_font = _font("PosterSans-Regular.otf", 20)
-    draw.text((285, 535), "IMDb RATING", font=label_font, fill=config["colors"]["white"])
-    draw.text((300, 575), rating_value, font=value_font, fill=config["colors"]["white"])
-    draw.text((505, 535), "STUDIO", font=label_font, fill=config["colors"]["white"])
-    studio_lines = _wrap(draw, studio_value, small_font, 185)
-    for index, line in enumerate(studio_lines[:2]):
-        draw.text((500, 580 + index * 24), line, font=small_font, fill=config["colors"]["white"])
-    draw.text((765, 535), "GENRES", font=label_font, fill=config["colors"]["white"])
-    genre_lines = _wrap(draw, genre_value, small_font, 190)
-    for index, line in enumerate(genre_lines[:3]):
-        draw.text((735, 580 + index * 24), line, font=small_font, fill=config["colors"]["white"])
+    rating_box = tuple(regions["rating"]["box"])
+    studio_box = tuple(regions["studio"]["box"])
+    genres_box = tuple(regions["genres"]["box"])
+    if rating:
+        rating_font = _fit_font(draw, rating, "PosterSans-Bold.otf", 42, 22, rating_box[2] - rating_box[0] - 8)
+        _draw_centered(draw, rating, rating_font, rating_box, white)
+    if studio:
+        studio_font = _font("PosterSans-Regular.otf", 21)
+        _draw_wrapped_centered(draw, studio, studio_font, studio_box, white, line_gap=2)
+    if isinstance(genres, str):
+        genre_text = genres
+    else:
+        genre_text = ", ".join(genres)
+    if genre_text:
+        genres_font = _font("PosterSans-Regular.otf", 20)
+        _draw_wrapped_centered(draw, genre_text, genres_font, genres_box, white, line_gap=2)
 
-    artwork = Image.open(artwork_path)
-    _paste_artwork(base, artwork, config, circle)
+    with Image.open(artwork_path) as artwork:
+        _paste_artwork(base, artwork, config, pristine.crop(tuple(config["decorative_circle"])))
+
     result = base.convert("RGB")
     if output_path:
         result.save(output_path, format="PNG", optimize=True)
